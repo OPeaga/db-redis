@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  /* Paleta DistriCommerce: #000000 • #14213d • #fca311 • #e5e5e5 • #ffffff */
+  --color-brand-black: #000000;
+  --color-brand-navy: #14213d;
+  --color-brand-navy-light: #1e315a;
+  --color-brand-amber: #fca311;
+  --color-brand-amber-hover: #e59008;
+  --color-brand-amber-soft: #fff4df;
+
+  --color-bg-canvas: #e5e5e5;
+  --color-bg-surface: #ffffff;
+  --color-bg-muted: #f4f4f5;
+
+  --color-border-subtle: #e5e5e5;
+  --color-border-strong: #cccccc;
+
+  --color-ink-primary: #000000;
+  --color-ink-secondary: rgba(20, 33, 61, 0.82);
+  --color-ink-muted: rgba(0, 0, 0, 0.58);
+
+  --color-deal-text: #14213d;
+  --color-deal-bg: #fff4df;
+  --color-success-text: #14532d;
+  --color-success-bg: #dcfce7;
+  --color-danger-text: #991b1b;
+  --color-danger-bg: #fee2e2;
+  --color-info-text: #1e3a8a;
+  --color-info-bg: #e0e7ff;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg-canvas);
+  color: var(--color-ink-primary);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}

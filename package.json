@@ -1,0 +1,43 @@
+{
+  "name": "projeto-cache",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:shared": "npm run build --workspace=shared",
+    "dev:backend": "npm run build:shared && npm run dev --workspace=backend",
+    "dev:frontend": "npm run build:shared && npm run dev --workspace=frontend",
+    "dev": "npm run build:shared && concurrently -n api,web -c cyan,yellow \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
+    "build:shared": "npm run build --workspace=shared",
+    "build:backend": "npm run build:shared && npm run build --workspace=backend",
+    "build:frontend": "npm run build:shared && npm run build --workspace=frontend",
+    "build": "npm run build:shared && npm run build --workspace=backend && npm run build --workspace=frontend",
+    "typecheck:shared": "npm run typecheck --workspace=shared",
+    "typecheck:backend": "npm run build:shared && npm run typecheck --workspace=backend",
+    "typecheck:frontend": "npm run build:shared && npm run typecheck --workspace=frontend",
+    "typecheck": "npm run build:shared && npm run typecheck --workspace=shared && npm run typecheck --workspace=backend && npm run typecheck --workspace=frontend",
+    "test:backend": "npm run build:shared && npm run test --workspace=backend",
+    "test:frontend": "npm run build:shared && npm run test --workspace=frontend",
+    "test": "npm run build:shared && npm run test --workspace=backend && npm run test --workspace=frontend",
+    "start:backend": "npm run start --workspace=backend",
+    "preview:frontend": "npm run preview --workspace=frontend",
+    "lint": "eslint . && prettier --check \"{shared,backend,frontend}/src/**/*.{ts,tsx}\"",
+    "format": "prettier --write \"{shared,backend,frontend}/src/**/*.{ts,tsx}\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.21.0",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.21.0",
+    "prettier": "^3.5.3",
+    "typescript": "~5.7.2",
+    "typescript-eslint": "^8.25.0"
+  }
+}
