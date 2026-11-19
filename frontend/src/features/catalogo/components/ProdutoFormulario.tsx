@@ -87,14 +87,12 @@ export const ProdutoFormulario: React.FC<ProdutoFormularioProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle pb-3">
           <div>
             <h3 className="text-base font-bold text-brand-black">
-              {produtoEdicao
-                ? `Atualizar Produto Completo (PUT • HSET produto:${produtoEdicao.id})`
-                : 'Inserir Novo Produto (POST • SET NX + HSET + SADD)'}
+              {produtoEdicao ? 'Editar produto' : 'Novo produto'}
             </h3>
             <p className="text-xs text-ink-muted">
               {produtoEdicao
-                ? 'Substitui os campos do Hash e atualiza o índice de SKU se modificado.'
-                : 'Testa unicidade de SKU com SET ... NX antes de inserir no catálogo.'}
+                ? 'Atualize as informações e preços do produto.'
+                : 'Informe um SKU único e os preços de varejo e atacado.'}
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={onCancelar}>
@@ -168,11 +166,7 @@ export const ProdutoFormulario: React.FC<ProdutoFormularioProps> = ({
             Cancelar
           </Button>
           <Button variant="accent" size="sm" type="submit" disabled={ocupado}>
-            {ocupado
-              ? 'Salvando no Redis...'
-              : produtoEdicao
-                ? 'Salvar Atualização (PUT)'
-                : 'Cadastrar no Redis (POST)'}
+            {ocupado ? 'Salvando…' : produtoEdicao ? 'Salvar alterações' : 'Cadastrar produto'}
           </Button>
         </div>
       </form>

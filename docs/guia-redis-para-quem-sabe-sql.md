@@ -40,9 +40,9 @@ Para não se perder, compare o que você já faz no SQL com o jeito que fazemos 
 
 ---
 
-## 3. Os 4 Tipos de "Caixinhas" que Usamos no Projeto
+## 3. Os 3 Tipos de "Caixinhas" que Usamos no Projeto
 
-Em um cache bem simples, dentro de cada caixinha só caberia um texto comum. O Redis é especial porque a caixinha pode ter **formatos diferentes por dentro**. Neste projeto usamos 4 formatos:
+Em um cache bem simples, dentro de cada caixinha só caberia um texto comum. O Redis é especial porque a caixinha pode ter **formatos diferentes por dentro**. Neste projeto usamos 3 formatos:
 
 ### A. Hash (`produto:{id}` e `carrinho:{cliente_id}`) — A Caixinha com Divisórias
 Um **Hash** é igualzinho a **uma única linha de uma tabela SQL**. Em vez de jogar um textão JSON inteiro lá dentro, a caixa tem divisórias nomeadas (`campo -> valor`):
@@ -88,8 +88,8 @@ SET catalogo:sku:CAFE-500G "prod-cafe" NX
 O **`NX`** significa *"Not Exists"* (só crie se **não existir**).
 Se outro usuário tentar cadastrar `CAFE-500G` ao mesmo tempo, o Redis vê que a etiqueta já existe, recusa na hora e o sistema devolve erro `409 Conflict`. É exatamente o papel da constraint `UNIQUE`, só que feita manualmente pela aplicação.
 
-### D. List (`auditoria:comandos`) — A Pilha de Recibos
-Uma **List** funciona como uma pilha de papéis em cima do balcão. Toda vez que a loja executa um comando no Redis, colocamos um recibo no topo da pilha (`LPUSH`) e cortamos o excesso para guardar só os últimos 50 (`LTRIM auditoria:comandos 0 49`). É assim que o painel **Raio-X do Redis** mostra o histórico em tempo real.
+> **Como acompanhamos os comandos e as caixinhas ao vivo?**
+> Em vez de gravar uma chave extra de histórico (`List`) no banco, o terminal do backend imprime em tempo real cada comando executado no Redis, e o **Redis Insight** (`http://localhost:5540`) mostra todas as caixinhas, divisórias e cronômetros (`TTL`) ao vivo sem poluir o keyspace.
 
 ---
 
@@ -133,6 +133,6 @@ Se você desligar o computador da tomada, a memória RAM zera. Por isso, quando 
 | Quanto custa guardar 100 GB? | Barato (disco é barato) | Muito caro (RAM custa bem mais caro) |
 | Como você busca os dados? | Pesquisas flexíveis (`WHERE`, `LIKE`, `ORDER BY`, `JOIN`) | Pela etiqueta exata da chave (`chave -> valor`) |
 | Garante 100% que um pagamento salvo nunca se perde na queda de energia? | Sim (transações ACID em disco) | Não é o foco principal (persistência assíncrona) |
-| Melhor uso no mundo real | Cadastro oficial de usuários, pedidos fechados, notas fiscais, relatórios | Carrinho temporário, sessão de login, cache de catálogo, contadores em tempo real, fila de auditoria |
+| Melhor uso no mundo real | Cadastro oficial de usuários, pedidos fechados, notas fiscais, relatórios | Carrinho temporário, sessão de login, cache de catálogo, contadores em tempo real, filas rápidas |
 
 **Em resumo:** se o SQL é o **cofre oficial** onde tudo fica registrado para sempre com segurança e organização de planilhas, o Redis é a **bancada expressa em memória** onde deixamos o que precisa ser lido e alterado em menos de 1 milissegundo.

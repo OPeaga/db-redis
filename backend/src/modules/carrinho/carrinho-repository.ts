@@ -107,7 +107,7 @@ export class CarrinhoRedisRepository implements ICarrinhoRepository {
     const camposCriados = await this.rastreador.clienteBruto.hset(chave, campo, String(quantidade));
     const operacao = camposCriados > 0 ? 'INSERCAO' : 'ATUALIZACAO';
 
-    await this.rastreador.registrarComando(`HSET ${chave} ${campo} "${quantidade}"`, operacao);
+    this.rastreador.registrarComando(`HSET ${chave} ${campo} "${quantidade}"`, operacao);
     await this.definirTtlSeAusente(chave, ttlSegundos, operacao);
 
     return camposCriados > 0 ? 'inserido' : 'atualizado';

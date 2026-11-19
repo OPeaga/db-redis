@@ -2,8 +2,36 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import type { ComandoAuditado, TipoOperacaoCrud } from '@projeto-cache/shared';
 
-export const CHAVE_AUDITORIA = 'auditoria:comandos';
-export const LIMITE_AUDITORIA = 50;
+const ANSI_RESET = '\x1b[0m';
+const ANSI_CINZA = '\x1b[90m';
+
+const COR_OPERACAO: Record<TipoOperacaoCrud, string> = {
+  INSERCAO: '\x1b[32m',
+  CONSULTA: '\x1b[36m',
+  ATUALIZACAO: '\x1b[33m',
+  ALTERACAO: '\x1b[35m',
+  EXCLUSAO: '\x1b[31m',
+};
+
+const LARGURA_TAG_OPERACAO = 11;
+
+/**
+ * Formata um comando Redis auditado com timestamp, tag de operação colorida e texto do comando para terminal.
+ */
+export function formatarComandoTerminal(entrada: ComandoAuditado): string {
+  const data = new Date(entrada.executadoEm);
+  const hora = Number.isNaN(data.getTime())
+    ? entrada.executadoEm
+    : data.toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+  const cor = COR_OPERACAO[entrada.operacao];
+  const preenchimento = ' '.repeat(Math.max(0, LARGURA_TAG_OPERACAO - entrada.operacao.length));
+
+  return `${ANSI_CINZA}[${hora}]${ANSI_RESET} ${cor}[${entrada.operacao}]${ANSI_RESET}${preenchimento} ${entrada.comando}`;
+}
 
 export interface IRedisPipeline {
   del(chave: string): IRedisPipeline;
@@ -39,8 +67,6 @@ export interface IRedisCliente {
   ttl(chave: string): Promise<number>;
   type(chave: string): Promise<string>;
   scan(cursor: string | number, ...args: Array<string | number>): Promise<[string, string[]]>;
-  lpush(chave: string, ...valores: string[]): Promise<number>;
-  ltrim(chave: string, inicio: number, fim: number): Promise<string>;
   lrange(chave: string, inicio: number, fim: number): Promise<string[]>;
   flushdb(): Promise<string>;
   info(secao?: string): Promise<string>;
@@ -58,14 +84,15 @@ interface ContextoCaptura {
 }
 
 /**
- * Encapsula o cliente Redis registrando os comandos executados na auditoria e no escopo da requisição.
+ * Encapsula o cliente Redis registrando os comandos executados no escopo da requisição e no callback de saída.
  */
 export class RastreadorRedis {
   private readonly contexto = new AsyncLocalStorage<ContextoCaptura>();
 
   constructor(
     readonly clienteBruto: IRedisCliente,
-    readonly modoConexao: ModoConexaoRedis
+    readonly modoConexao: ModoConexaoRedis,
+    private readonly onComando?: (entrada: ComandoAuditado) => void
   ) {}
 
   /**
@@ -81,9 +108,9 @@ export class RastreadorRedis {
   }
 
   /**
-   * Registra um comando textual no contexto atual e persiste na lista capped `auditoria:comandos`.
+   * Registra um comando textual no contexto atual e notifica o observador configurado.
    */
-  async registrarComando(comando: string, operacaoExplicita?: TipoOperacaoCrud): Promise<void> {
+  registrarComando(comando: string, operacaoExplicita?: TipoOperacaoCrud): void {
     const store = this.contexto.getStore();
     const operacao = operacaoExplicita ?? store?.operacaoPadrao ?? 'CONSULTA';
     const entrada: ComandoAuditado = {
@@ -97,8 +124,7 @@ export class RastreadorRedis {
       store.comandos.push(entrada);
     }
 
-    await this.clienteBruto.lpush(CHAVE_AUDITORIA, JSON.stringify(entrada));
-    await this.clienteBruto.ltrim(CHAVE_AUDITORIA, 0, LIMITE_AUDITORIA - 1);
+    this.onComando?.(entrada);
   }
 
   /**
@@ -110,7 +136,7 @@ export class RastreadorRedis {
     operacao?: TipoOperacaoCrud
   ): Promise<T> {
     const resultado = await acao(this.clienteBruto);
-    await this.registrarComando(comando, operacao);
+    this.registrarComando(comando, operacao);
     return resultado;
   }
 

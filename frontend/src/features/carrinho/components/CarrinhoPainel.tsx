@@ -7,7 +7,6 @@ export interface CarrinhoPainelProps {
   carrinho: CarrinhoDetalhado | null;
   ttlVivo: number;
   ocupado: boolean;
-  onRecarregar: () => Promise<void>;
   onAlterarQuantidade: (produtoId: string, delta: number) => Promise<void>;
   onDefinirQuantidade: (produtoId: string, quantidade: number) => Promise<void>;
   onRemoverItem: (produtoId: string) => Promise<void>;
@@ -20,7 +19,6 @@ export const CarrinhoPainel: React.FC<CarrinhoPainelProps> = ({
   carrinho,
   ttlVivo,
   ocupado,
-  onRecarregar,
   onAlterarQuantidade,
   onDefinirQuantidade,
   onRemoverItem,
@@ -55,12 +53,9 @@ export const CarrinhoPainel: React.FC<CarrinhoPainelProps> = ({
 
           {!temItens ? (
             <div className="p-10 text-center space-y-3">
-              <p className="text-base font-semibold text-brand-black">
-                Carrinho vazio ou expirado no Redis
-              </p>
+              <p className="text-base font-semibold text-brand-black">Seu carrinho está vazio</p>
               <p className="text-sm text-ink-muted">
-                Adicione produtos na vitrine para criar o Hash{' '}
-                <code>{carrinho?.chaveRedis ?? 'carrinho:cliente-demo'}</code> com TTL automático.
+                Adicione produtos da vitrine para aproveitar os preços de atacado.
               </p>
               {onContinuarComprando && (
                 <Button variant="accent" onClick={onContinuarComprando}>
@@ -198,18 +193,11 @@ export const CarrinhoPainel: React.FC<CarrinhoPainelProps> = ({
           </div>
 
           <div className="rounded-md bg-bg-muted p-3.5 space-y-2.5 border border-border-subtle">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-semibold text-brand-navy">Sessão Redis (Hash + TTL)</p>
-                <code className="text-[11px] text-ink-muted">
-                  {carrinho?.chaveRedis ?? 'carrinho:cliente-demo'}
-                </code>
-              </div>
-              {carrinho && (
-                <Badge variant={ttlCritico ? 'danger' : ttlVivo > 0 ? 'amber' : 'neutral'}>
-                  TTL: {formatarTtl(ttlVivo)}
-                </Badge>
-              )}
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-ink-secondary">Validade do carrinho</span>
+              <Badge variant={ttlCritico ? 'danger' : ttlVivo > 0 ? 'amber' : 'neutral'}>
+                {temItens ? formatarTtl(ttlVivo) : 'Inativo'}
+              </Badge>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -219,7 +207,7 @@ export const CarrinhoPainel: React.FC<CarrinhoPainelProps> = ({
                 onClick={() => void onAtualizarTtl(10)}
                 disabled={ocupado || !temItens}
               >
-                Simular Expiração (10s)
+                Expirar em 10s
               </Button>
               <Button
                 variant="secondary"
@@ -227,25 +215,19 @@ export const CarrinhoPainel: React.FC<CarrinhoPainelProps> = ({
                 onClick={() => void onAtualizarTtl(1800)}
                 disabled={ocupado || !temItens}
               >
-                Renovar TTL (30m)
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => void onRecarregar()}
-                disabled={ocupado}
-              >
-                Ler (HGETALL)
-              </Button>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => void onLimparCarrinho()}
-                disabled={ocupado || !temItens}
-              >
-                Limpar (DEL)
+                Renovar (30m)
               </Button>
             </div>
+
+            <Button
+              variant="danger"
+              size="sm"
+              className="w-full"
+              onClick={() => void onLimparCarrinho()}
+              disabled={ocupado || !temItens}
+            >
+              Limpar carrinho
+            </Button>
           </div>
         </Card>
       </div>

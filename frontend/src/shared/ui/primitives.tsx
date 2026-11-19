@@ -8,8 +8,7 @@ import clsx from 'clsx';
 export const designTokens = {
   layout: {
     container: 'max-w-7xl mx-auto px-4',
-    productGrid: 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5',
-    productGridFull: 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5',
+    productGrid: 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5',
   },
   header: {
     bar: 'bg-brand-navy text-white shadow-sm',
