@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import {
+  estadoRedisSchema,
   produtoSchema,
   type AlterarEstoquePrecoInput,
   type AtualizarProdutoInput,
   type CriarProdutoInput,
   type EnvelopeOperacao,
+  type EstadoRedis,
   type Produto,
 } from '@projeto-cache/shared';
 import { httpRequest } from '@shared/api/http-client';
@@ -38,6 +40,12 @@ export const catalogoApi = {
   excluir(id: string): Promise<EnvelopeOperacao<{ id: string }>> {
     return httpRequest(`/api/produtos/${encodeURIComponent(id)}`, z.object({ id: z.string() }), {
       method: 'DELETE',
+    });
+  },
+
+  restaurarDadosIniciais(): Promise<EnvelopeOperacao<EstadoRedis>> {
+    return httpRequest('/api/inspecao/resetar', estadoRedisSchema, {
+      method: 'POST',
     });
   },
 };

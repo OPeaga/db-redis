@@ -3,14 +3,11 @@ import clsx from 'clsx';
 import {
   CLIENTE_DEMO_ID,
   type CarrinhoDetalhado,
-  type ComandoAuditado,
   type CriarProdutoInput,
-  type EstadoRedis,
   type Produto,
 } from '@projeto-cache/shared';
 import { carrinhoApi, CarrinhoPainel } from '@features/carrinho';
 import { AdminCatalogoPainel, catalogoApi, CatalogoPainel } from '@features/catalogo';
-import { inspecaoApi, RaioXRedisPainel } from '@features/inspecao';
 import { ApiError } from '@shared/api/api-error';
 import { formatarTtl } from '@shared/lib/formatadores';
 import { designTokens } from '@shared/ui/primitives';
@@ -22,23 +19,15 @@ export const BancadaPage: React.FC = () => {
   const [busca, setBusca] = useState('');
   const [buscaInput, setBuscaInput] = useState('');
   const [categoriaAtiva, setCategoriaAtiva] = useState('');
-  const [raioxAberto, setRaioxAberto] = useState(true);
 
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [carrinho, setCarrinho] = useState<CarrinhoDetalhado | null>(null);
-  const [estadoRedis, setEstadoRedis] = useState<EstadoRedis | null>(null);
-  const [ultimosComandos, setUltimosComandos] = useState<ComandoAuditado[]>([]);
   const [ttlVivo, setTtlVivo] = useState<number>(-2);
   const [carregandoInicial, setCarregandoInicial] = useState(true);
   const [ocupado, setOcupado] = useState(false);
   const [erroGeral, setErroGeral] = useState<string | null>(null);
   const [erroFormulario, setErroFormulario] = useState<string | null>(null);
   const expirouAutomaticamenteRef = useRef(false);
-
-  const sincronizarInspecao = useCallback(async () => {
-    const respInspecao = await inspecaoApi.obterEstado();
-    setEstadoRedis(respInspecao.dados);
-  }, []);
 
   const carregarTudo = useCallback(async () => {
     setCarregandoInicial(true);
@@ -51,19 +40,15 @@ export const BancadaPage: React.FC = () => {
       setProdutos(respCatalogo.dados);
       setCarrinho(respCarrinho.dados);
       setTtlVivo(respCarrinho.dados.ttlSegundos);
-      setUltimosComandos([...respCatalogo.comandosRedis, ...respCarrinho.comandosRedis]);
       expirouAutomaticamenteRef.current = false;
-      await sincronizarInspecao();
     } catch (erro) {
       setErroGeral(
-        erro instanceof ApiError
-          ? erro.mensagem
-          : 'Erro ao carregar dados iniciais do servidor Redis.'
+        erro instanceof ApiError ? erro.mensagem : 'Erro ao carregar dados iniciais do servidor.'
       );
     } finally {
       setCarregandoInicial(false);
     }
-  }, [sincronizarInspecao]);
+  }, []);
 
   useEffect(() => {
     void carregarTudo();
@@ -94,14 +79,12 @@ export const BancadaPage: React.FC = () => {
           const respCarrinho = await carrinhoApi.obter(CLIENTE_DEMO_ID);
           setCarrinho(respCarrinho.dados);
           setTtlVivo(respCarrinho.dados.ttlSegundos);
-          setUltimosComandos(respCarrinho.comandosRedis);
-          await sincronizarInspecao();
         } catch {
           // Ignora falha transitória durante expiração automática.
         }
       })();
     }
-  }, [ttlVivo, sincronizarInspecao]);
+  }, [ttlVivo]);
 
   const categorias = useMemo(() => {
     return Array.from(new Set(produtos.map((p) => p.categoria))).sort((a, b) =>
@@ -120,16 +103,14 @@ export const BancadaPage: React.FC = () => {
   const totalUnidades = carrinho?.totalUnidades ?? 0;
 
   const executarOperacao = async (
-    acao: () => Promise<ComandoAuditado[]>,
+    acao: () => Promise<void>,
     destinoErro: 'geral' | 'formulario' = 'geral'
   ): Promise<boolean> => {
     setOcupado(true);
     setErroGeral(null);
     setErroFormulario(null);
     try {
-      const comandos = await acao();
-      setUltimosComandos(comandos);
-      await sincronizarInspecao();
+      await acao();
       return true;
     } catch (erro) {
       const mensagem = erro instanceof ApiError ? erro.mensagem : 'Erro inesperado na operação.';
@@ -148,7 +129,6 @@ export const BancadaPage: React.FC = () => {
     await executarOperacao(async () => {
       const resp = await catalogoApi.listar();
       setProdutos(resp.dados);
-      return resp.comandosRedis;
     });
   };
 
@@ -158,7 +138,6 @@ export const BancadaPage: React.FC = () => {
       setProdutos((atuais) =>
         [...atuais, resp.dados].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
       );
-      return resp.comandosRedis;
     }, 'formulario');
   };
 
@@ -172,7 +151,6 @@ export const BancadaPage: React.FC = () => {
       );
       const respCarrinho = await carrinhoApi.obter(CLIENTE_DEMO_ID);
       setCarrinho(respCarrinho.dados);
-      return resp.comandosRedis;
     }, 'formulario');
   };
 
@@ -180,100 +158,73 @@ export const BancadaPage: React.FC = () => {
     await executarOperacao(async () => {
       const resp = await catalogoApi.alterarParcial(id, { deltaEstoque: delta });
       setProdutos((atuais) => atuais.map((p) => (p.id === id ? resp.dados : p)));
-      return resp.comandosRedis;
     });
   };
 
   const handleExcluirProduto = async (id: string) => {
     await executarOperacao(async () => {
-      const resp = await catalogoApi.excluir(id);
+      await catalogoApi.excluir(id);
       setProdutos((atuais) => atuais.filter((p) => p.id !== id));
       const respCarrinho = await carrinhoApi.obter(CLIENTE_DEMO_ID);
       setCarrinho(respCarrinho.dados);
       setTtlVivo(respCarrinho.dados.ttlSegundos);
-      return resp.comandosRedis;
     });
   };
 
-  const aplicarRespostaCarrinho = (
-    dados: CarrinhoDetalhado,
-    comandos: ComandoAuditado[]
-  ): ComandoAuditado[] => {
+  const aplicarRespostaCarrinho = (dados: CarrinhoDetalhado) => {
     setCarrinho(dados);
     setTtlVivo(dados.ttlSegundos);
     expirouAutomaticamenteRef.current = false;
-    return comandos;
   };
 
   const handleAdicionarAoCarrinho = async (produtoId: string) => {
     await executarOperacao(async () => {
       const resp = await carrinhoApi.alterarQuantidade(CLIENTE_DEMO_ID, produtoId, 1);
-      return aplicarRespostaCarrinho(resp.dados, resp.comandosRedis);
-    });
-  };
-
-  const handleRecarregarCarrinho = async () => {
-    await executarOperacao(async () => {
-      const resp = await carrinhoApi.obter(CLIENTE_DEMO_ID);
-      return aplicarRespostaCarrinho(resp.dados, resp.comandosRedis);
+      aplicarRespostaCarrinho(resp.dados);
     });
   };
 
   const handleAlterarQuantidadeCarrinho = async (produtoId: string, delta: number) => {
     await executarOperacao(async () => {
       const resp = await carrinhoApi.alterarQuantidade(CLIENTE_DEMO_ID, produtoId, delta);
-      return aplicarRespostaCarrinho(resp.dados, resp.comandosRedis);
+      aplicarRespostaCarrinho(resp.dados);
     });
   };
 
   const handleDefinirQuantidadeCarrinho = async (produtoId: string, quantidade: number) => {
     await executarOperacao(async () => {
       const resp = await carrinhoApi.definirItem(CLIENTE_DEMO_ID, produtoId, quantidade);
-      return aplicarRespostaCarrinho(resp.dados, resp.comandosRedis);
+      aplicarRespostaCarrinho(resp.dados);
     });
   };
 
   const handleRemoverItemCarrinho = async (produtoId: string) => {
     await executarOperacao(async () => {
       const resp = await carrinhoApi.removerItem(CLIENTE_DEMO_ID, produtoId);
-      return aplicarRespostaCarrinho(resp.dados, resp.comandosRedis);
+      aplicarRespostaCarrinho(resp.dados);
     });
   };
 
   const handleLimparCarrinho = async () => {
     await executarOperacao(async () => {
       const resp = await carrinhoApi.limpar(CLIENTE_DEMO_ID);
-      return aplicarRespostaCarrinho(resp.dados, resp.comandosRedis);
+      aplicarRespostaCarrinho(resp.dados);
     });
   };
 
   const handleAtualizarTtl = async (ttlSegundos: number) => {
     await executarOperacao(async () => {
       const resp = await carrinhoApi.atualizarTtl(CLIENTE_DEMO_ID, ttlSegundos);
-      return aplicarRespostaCarrinho(resp.dados, resp.comandosRedis);
+      aplicarRespostaCarrinho(resp.dados);
     });
   };
 
-  const handleAtualizarInspecao = async () => {
-    setOcupado(true);
-    setErroGeral(null);
-    try {
-      await sincronizarInspecao();
-    } catch (erro) {
-      setErroGeral(erro instanceof ApiError ? erro.mensagem : 'Erro ao consultar keyspace.');
-    } finally {
-      setOcupado(false);
-    }
-  };
-
-  const handleResetarSeed = async () => {
+  const handleRestaurarDadosIniciais = async () => {
     setOcupado(true);
     setErroGeral(null);
     setErroFormulario(null);
     try {
-      const respReset = await inspecaoApi.resetarSeed();
-      setEstadoRedis(respReset.dados);
-      setUltimosComandos(respReset.comandosRedis);
+      await catalogoApi.restaurarDadosIniciais();
 
       const [respCatalogo, respCarrinho] = await Promise.all([
         catalogoApi.listar(),
@@ -283,9 +234,8 @@ export const BancadaPage: React.FC = () => {
       setCarrinho(respCarrinho.dados);
       setTtlVivo(respCarrinho.dados.ttlSegundos);
       expirouAutomaticamenteRef.current = false;
-      await sincronizarInspecao();
     } catch (erro) {
-      setErroGeral(erro instanceof ApiError ? erro.mensagem : 'Erro ao resetar seed no Redis.');
+      setErroGeral(erro instanceof ApiError ? erro.mensagem : 'Erro ao restaurar dados iniciais.');
     } finally {
       setOcupado(false);
     }
@@ -333,7 +283,7 @@ export const BancadaPage: React.FC = () => {
                   Distri<span className="text-brand-amber">Commerce</span>
                 </span>
                 <span className="text-[10px] text-white/65 tracking-wide uppercase">
-                  Cache Redis • Varejo &amp; Atacado
+                  Varejo &amp; Atacado
                 </span>
               </div>
             </button>
@@ -372,39 +322,6 @@ export const BancadaPage: React.FC = () => {
                 </svg>
               </button>
             </form>
-
-            <button
-              type="button"
-              aria-expanded={raioxAberto}
-              onClick={() => setRaioxAberto((aberto) => !aberto)}
-              className={clsx(
-                'inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold transition-colors cursor-pointer shrink-0 border',
-                raioxAberto
-                  ? 'bg-brand-amber text-brand-black border-brand-amber'
-                  : 'bg-white/10 text-white border-white/15 hover:bg-white/15'
-              )}
-            >
-              <svg
-                aria-hidden="true"
-                className="w-4 h-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <rect x="3" y="4" width="18" height="16" rx="2" />
-                <path d="M15 4v16" />
-              </svg>
-              <span>{raioxAberto ? 'Ocultar Raio-X' : 'Raio-X Redis'}</span>
-              <span
-                className={clsx(
-                  'px-1.5 py-0.5 rounded-sm text-[10px] font-bold tabular-nums',
-                  raioxAberto ? 'bg-brand-black text-brand-amber' : 'bg-white/15 text-white'
-                )}
-              >
-                {estadoRedis?.totalChaves ?? 0}
-              </span>
-            </button>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-white/10">
@@ -508,7 +425,7 @@ export const BancadaPage: React.FC = () => {
                       abaAtiva === 'carrinho' ? 'text-brand-black/80' : 'text-white/75'
                     )}
                   >
-                    {formatarTtl(ttlVivo).split(' ')[0]}
+                    {formatarTtl(ttlVivo)}
                   </span>
                 )}
               </button>
@@ -527,67 +444,48 @@ export const BancadaPage: React.FC = () => {
           </div>
         )}
 
-        <div
-          className={
-            raioxAberto ? 'grid grid-cols-1 lg:grid-cols-12 gap-6 items-start' : 'space-y-6'
-          }
-        >
-          <div className={raioxAberto ? 'lg:col-span-8 min-w-0' : 'min-w-0'}>
-            {abaAtiva === 'catalogo' && (
-              <CatalogoPainel
-                produtos={produtos}
-                carregando={carregandoInicial}
-                ocupado={ocupado}
-                busca={busca}
-                categoriaAtiva={categoriaAtiva}
-                quantidadesCarrinho={quantidadesCarrinho}
-                raioxAberto={raioxAberto}
-                onLimparFiltros={handleLimparFiltros}
-                onAdicionarAoCarrinho={handleAdicionarAoCarrinho}
-                onIrParaCarrinho={() => setAbaAtiva('carrinho')}
-              />
-            )}
+        <div className="space-y-6">
+          {abaAtiva === 'catalogo' && (
+            <CatalogoPainel
+              produtos={produtos}
+              carregando={carregandoInicial}
+              ocupado={ocupado}
+              busca={busca}
+              categoriaAtiva={categoriaAtiva}
+              quantidadesCarrinho={quantidadesCarrinho}
+              onLimparFiltros={handleLimparFiltros}
+              onAdicionarAoCarrinho={handleAdicionarAoCarrinho}
+              onIrParaCarrinho={() => setAbaAtiva('carrinho')}
+            />
+          )}
 
-            {abaAtiva === 'carrinho' && (
-              <CarrinhoPainel
-                carrinho={carrinho}
-                ttlVivo={ttlVivo}
-                ocupado={ocupado}
-                onRecarregar={handleRecarregarCarrinho}
-                onAlterarQuantidade={handleAlterarQuantidadeCarrinho}
-                onDefinirQuantidade={handleDefinirQuantidadeCarrinho}
-                onRemoverItem={handleRemoverItemCarrinho}
-                onLimparCarrinho={handleLimparCarrinho}
-                onAtualizarTtl={handleAtualizarTtl}
-                onContinuarComprando={() => setAbaAtiva('catalogo')}
-              />
-            )}
+          {abaAtiva === 'carrinho' && (
+            <CarrinhoPainel
+              carrinho={carrinho}
+              ttlVivo={ttlVivo}
+              ocupado={ocupado}
+              onAlterarQuantidade={handleAlterarQuantidadeCarrinho}
+              onDefinirQuantidade={handleDefinirQuantidadeCarrinho}
+              onRemoverItem={handleRemoverItemCarrinho}
+              onLimparCarrinho={handleLimparCarrinho}
+              onAtualizarTtl={handleAtualizarTtl}
+              onContinuarComprando={() => setAbaAtiva('catalogo')}
+            />
+          )}
 
-            {abaAtiva === 'admin' && (
-              <AdminCatalogoPainel
-                produtos={produtos}
-                carregando={carregandoInicial}
-                ocupado={ocupado}
-                erroFormulario={erroFormulario}
-                onRecarregar={handleRecarregarCatalogo}
-                onCriarProduto={handleCriarProduto}
-                onAtualizarProduto={handleAtualizarProduto}
-                onAlterarEstoque={handleAlterarEstoque}
-                onExcluirProduto={handleExcluirProduto}
-              />
-            )}
-          </div>
-
-          {raioxAberto && (
-            <div className="lg:col-span-4 min-w-0 lg:sticky lg:top-4">
-              <RaioXRedisPainel
-                estado={estadoRedis}
-                ultimosComandos={ultimosComandos}
-                ocupado={ocupado}
-                onAtualizar={handleAtualizarInspecao}
-                onResetarSeed={handleResetarSeed}
-              />
-            </div>
+          {abaAtiva === 'admin' && (
+            <AdminCatalogoPainel
+              produtos={produtos}
+              carregando={carregandoInicial}
+              ocupado={ocupado}
+              erroFormulario={erroFormulario}
+              onRecarregar={handleRecarregarCatalogo}
+              onRestaurarDadosIniciais={handleRestaurarDadosIniciais}
+              onCriarProduto={handleCriarProduto}
+              onAtualizarProduto={handleAtualizarProduto}
+              onAlterarEstoque={handleAlterarEstoque}
+              onExcluirProduto={handleExcluirProduto}
+            />
           )}
         </div>
       </main>

@@ -81,7 +81,7 @@ export class CatalogoRedisRepository implements ICatalogoRepository {
       pipeline.hgetall(chaveProduto(id));
     }
     const resultados = await pipeline.exec();
-    await this.rastreador.registrarComando(
+    this.rastreador.registrarComando(
       `PIPELINE HGETALL produto:{id} (${idsOrdenados.length} chaves)`,
       'CONSULTA'
     );
@@ -189,7 +189,7 @@ export class CatalogoRedisRepository implements ICatalogoRepository {
     for (const chaveCar of chavesCarrinhos) {
       const removido = await this.rastreador.clienteBruto.hdel(chaveCar, campoItem);
       if (removido > 0) {
-        await this.rastreador.registrarComando(`HDEL ${chaveCar} ${campoItem}`, 'EXCLUSAO');
+        this.rastreador.registrarComando(`HDEL ${chaveCar} ${campoItem}`, 'EXCLUSAO');
       }
     }
 

@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -40,19 +40,16 @@ function criarEstadoInicial() {
 
   const itensCarrinho: Record<string, number> = { 'prod-cafe': 5 };
   let ttlCarrinho = 1800;
-  const auditoria: ComandoAuditado[] = [];
   let seq = 1;
+  let chamadasInspecaoGet = 0;
+  const ttlsEnviados: number[] = [];
 
-  const registrar = (operacao: ComandoAuditado['operacao'], comando: string): ComandoAuditado => {
-    const entry: ComandoAuditado = {
-      id: `cmd-${seq++}`,
-      operacao,
-      comando,
-      executadoEm: '2026-11-18T10:01:00.000Z',
-    };
-    auditoria.unshift(entry);
-    return entry;
-  };
+  const registrar = (operacao: ComandoAuditado['operacao'], comando: string): ComandoAuditado => ({
+    id: `cmd-${seq++}`,
+    operacao,
+    comando,
+    executadoEm: '2026-11-18T10:01:00.000Z',
+  });
 
   const montarCarrinho = (): CarrinhoDetalhado => {
     const itens = Object.entries(itensCarrinho)
@@ -97,53 +94,28 @@ function criarEstadoInicial() {
     };
   };
 
-  const montarInspecao = (): EstadoRedis => {
-    const chaves: EstadoRedis['chaves'] = [
-      {
-        chave: 'catalogo:produtos',
-        tipo: 'set',
-        ttlSegundos: -1,
-        valor: produtos.map((p) => p.id),
-      },
-      ...produtos.map((p) => ({
-        chave: `produto:${p.id}`,
-        tipo: 'hash' as const,
-        ttlSegundos: -1,
-        valor: { id: p.id, sku: p.sku, nome: p.nome, estoque: String(p.estoque) },
-      })),
-    ];
-
-    if (Object.keys(itensCarrinho).length > 0) {
-      const hashCarrinho: Record<string, string> = {};
-      for (const [k, v] of Object.entries(itensCarrinho)) {
-        hashCarrinho[`item:${k}`] = String(v);
-      }
-      chaves.unshift({
-        chave: 'carrinho:cliente-demo',
-        tipo: 'hash',
-        ttlSegundos: ttlCarrinho,
-        valor: hashCarrinho,
-      });
-    }
-
-    return {
-      modoConexao: 'redis-real',
-      totalChaves: chaves.length,
-      memoriaUsadaLegivel: '1.42M',
-      chaves,
-      auditoria: [...auditoria],
-    };
-  };
+  const montarInspecao = (): EstadoRedis => ({
+    modoConexao: 'redis-real',
+    totalChaves: produtos.length + 1,
+    memoriaUsadaLegivel: '1.42M',
+    chaves: [],
+    auditoria: [],
+  });
 
   return {
     produtos,
     itensCarrinho,
-    auditoria,
+    ttlsEnviados,
     registrar,
     montarCarrinho,
     montarInspecao,
+    registrarChamadaInspecaoGet: () => {
+      chamadasInspecaoGet += 1;
+    },
+    obterChamadasInspecaoGet: () => chamadasInspecaoGet,
     setTtl: (v: number) => {
       ttlCarrinho = v;
+      ttlsEnviados.push(v);
     },
   };
 }
@@ -197,6 +169,16 @@ const server = setupServer(
     return HttpResponse.json({ dados: estadoMock.montarCarrinho(), comandosRedis: [cmd] });
   }),
 
+  http.patch('*/api/carrinho/:clienteId/ttl', async ({ request }) => {
+    const body = (await request.json()) as { ttlSegundos: number };
+    estadoMock.setTtl(body.ttlSegundos);
+    const cmd = estadoMock.registrar(
+      'ATUALIZACAO',
+      `EXPIRE carrinho:cliente-demo ${body.ttlSegundos}`
+    );
+    return HttpResponse.json({ dados: estadoMock.montarCarrinho(), comandosRedis: [cmd] });
+  }),
+
   http.delete('*/api/carrinho/:clienteId/itens/:produtoId', ({ params }) => {
     const { produtoId } = params as { produtoId: string };
     delete estadoMock.itensCarrinho[produtoId];
@@ -204,8 +186,31 @@ const server = setupServer(
     return HttpResponse.json({ dados: estadoMock.montarCarrinho(), comandosRedis: [cmd] });
   }),
 
+  http.delete('*/api/carrinho/:clienteId', () => {
+    for (const chave of Object.keys(estadoMock.itensCarrinho)) {
+      delete estadoMock.itensCarrinho[chave];
+    }
+    const cmd = estadoMock.registrar('EXCLUSAO', 'DEL carrinho:cliente-demo');
+    return HttpResponse.json({ dados: estadoMock.montarCarrinho(), comandosRedis: [cmd] });
+  }),
+
   http.get('*/api/inspecao', () => {
+    estadoMock.registrarChamadaInspecaoGet();
     return HttpResponse.json({ dados: estadoMock.montarInspecao(), comandosRedis: [] });
+  }),
+
+  http.post('*/api/inspecao/resetar', () => {
+    const inicial = criarEstadoInicial();
+    estadoMock.produtos.splice(0, estadoMock.produtos.length, ...inicial.produtos);
+    for (const chave of Object.keys(estadoMock.itensCarrinho)) {
+      delete estadoMock.itensCarrinho[chave];
+    }
+    estadoMock.itensCarrinho['prod-cafe'] = 2;
+    const cmd = estadoMock.registrar(
+      'INSERCAO',
+      'FLUSHDB -> SEED (6 produtos + carrinho:cliente-demo TTL 1800s)'
+    );
+    return HttpResponse.json({ dados: estadoMock.montarInspecao(), comandosRedis: [cmd] });
   })
 );
 
@@ -216,8 +221,8 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
-describe('BancadaPage (Vitrine, Carrinho, Admin e Raio-X Redis)', () => {
-  it('carrega Vitrine limpa, navega ao Carrinho e ativa ATACADO via HINCRBY refletindo nos Comandos', async () => {
+describe('BancadaPage (Vitrine, Carrinho e Admin enxutos)', () => {
+  it('carrega Vitrine sem Raio-X nem polling de inspeção, navega ao Carrinho e ativa ATACADO', async () => {
     const user = userEvent.setup();
     render(<BancadaPage />);
 
@@ -225,7 +230,11 @@ describe('BancadaPage (Vitrine, Carrinho, Admin e Raio-X Redis)', () => {
       await screen.findByRole('heading', { name: 'Café Torrado e Moído 500g' })
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Editar' })).not.toBeInTheDocument();
-    expect(screen.getByText('Redis Real (:6379)')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('complementary', { name: 'Raio-X do Redis' })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Raio-X/i })).not.toBeInTheDocument();
+    expect(estadoMock.obterChamadasInspecaoGet()).toBe(0);
 
     await user.click(screen.getByRole('button', { name: 'Carrinho de compras' }));
 
@@ -237,10 +246,7 @@ describe('BancadaPage (Vitrine, Carrinho, Admin e Raio-X Redis)', () => {
     await user.click(btnIncrementar);
 
     expect(await screen.findByText('ATACADO')).toBeInTheDocument();
-    const painelComandos = screen.getByRole('tabpanel', { name: 'Comandos Redis' });
-    expect(
-      within(painelComandos).getByText(/HINCRBY carrinho:cliente-demo item:prod-cafe 1/)
-    ).toBeInTheDocument();
+    expect(estadoMock.obterChamadasInspecaoGet()).toBe(0);
   });
 
   it('avisa no Carrinho quando o estoque atual é menor que a quantidade e bloqueia aumentar', async () => {
@@ -270,7 +276,7 @@ describe('BancadaPage (Vitrine, Carrinho, Admin e Raio-X Redis)', () => {
     expect(screen.queryByText(/Estoque atual \(/)).not.toBeInTheDocument();
   });
 
-  it('cadastra novo produto no Painel Admin e remove item do Carrinho via HDEL', async () => {
+  it('cadastra novo produto no Painel Admin e remove item do Carrinho exibindo estado vazio', async () => {
     const user = userEvent.setup();
     render(<BancadaPage />);
 
@@ -281,18 +287,15 @@ describe('BancadaPage (Vitrine, Carrinho, Admin e Raio-X Redis)', () => {
       await screen.findByRole('heading', { name: 'Itens Disponíveis à Venda' })
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '+ Novo Produto (POST)' }));
+    await user.click(screen.getByRole('button', { name: '+ Novo produto' }));
 
     await user.type(screen.getByLabelText('SKU (único)'), 'CHOC-1KG');
     await user.type(screen.getByLabelText('Nome do Produto'), 'Chocolate em Pó 1kg');
-    await user.click(screen.getByRole('button', { name: 'Cadastrar no Redis (POST)' }));
+    await user.click(screen.getByRole('button', { name: 'Cadastrar produto' }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Chocolate em Pó 1kg' })).toBeInTheDocument();
     });
-
-    const painelComandos = screen.getByRole('tabpanel', { name: 'Comandos Redis' });
-    expect(within(painelComandos).getByText(/SET catalogo:sku:CHOC-1KG/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Carrinho de compras' }));
 
@@ -302,40 +305,38 @@ describe('BancadaPage (Vitrine, Carrinho, Admin e Raio-X Redis)', () => {
     await user.click(btnRemover);
 
     await waitFor(() => {
-      expect(screen.getByText('Carrinho vazio ou expirado no Redis')).toBeInTheDocument();
+      expect(screen.getByText('Seu carrinho está vazio')).toBeInTheDocument();
     });
-
-    expect(
-      within(screen.getByRole('tabpanel', { name: 'Comandos Redis' })).getByText(
-        'HDEL carrinho:cliente-demo item:prod-cafe'
-      )
-    ).toBeInTheDocument();
+    expect(estadoMock.obterChamadasInspecaoGet()).toBe(0);
   });
 
-  it('alterna entre Comandos e Keyspace no Raio-X e permite recolher e expandir o painel lateral', async () => {
+  it('permite ajustar validade, limpar carrinho e restaurar dados iniciais no Painel Admin', async () => {
     const user = userEvent.setup();
     render(<BancadaPage />);
 
     await screen.findByRole('heading', { name: 'Café Torrado e Moído 500g' });
+    await user.click(screen.getByRole('button', { name: 'Carrinho de compras' }));
 
-    const tabKeyspace = screen.getByRole('tab', { name: /Keyspace/ });
-    await user.click(tabKeyspace);
+    await user.click(await screen.findByRole('button', { name: 'Expirar em 10s' }));
+    await waitFor(() => {
+      expect(estadoMock.ttlsEnviados).toContain(10);
+    });
 
-    const painelKeyspace = screen.getByRole('tabpanel', { name: 'Keyspace Redis' });
-    expect(within(painelKeyspace).getByText('carrinho:cliente-demo')).toBeInTheDocument();
-    expect(within(painelKeyspace).getByText('catalogo:produtos')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Renovar (30m)' }));
+    await waitFor(() => {
+      expect(estadoMock.ttlsEnviados).toContain(1800);
+    });
 
-    await user.click(screen.getByRole('tab', { name: /Comandos/ }));
-    expect(screen.getByRole('tabpanel', { name: 'Comandos Redis' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Limpar carrinho' }));
+    await waitFor(() => {
+      expect(screen.getByText('Seu carrinho está vazio')).toBeInTheDocument();
+    });
 
-    const btnOcultar = screen.getByRole('button', { name: /Ocultar Raio-X/ });
-    await user.click(btnOcultar);
-    expect(
-      screen.queryByRole('complementary', { name: 'Raio-X do Redis' })
-    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Painel Admin' }));
+    await user.click(await screen.findByRole('button', { name: 'Restaurar dados iniciais' }));
 
-    const btnExpandir = screen.getByRole('button', { name: /Raio-X Redis/ });
-    await user.click(btnExpandir);
-    expect(screen.getByRole('complementary', { name: 'Raio-X do Redis' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Carrinho de compras' }));
+    expect(await screen.findByText('Carrinho de compras (2)')).toBeInTheDocument();
+    expect(estadoMock.obterChamadasInspecaoGet()).toBe(0);
   });
 });

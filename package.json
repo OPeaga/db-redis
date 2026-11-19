@@ -30,7 +30,10 @@
     "start:backend": "npm run start --workspace=backend",
     "preview:frontend": "npm run preview --workspace=frontend",
     "lint": "eslint . && prettier --check \"{shared,backend,frontend}/src/**/*.{ts,tsx}\"",
-    "format": "prettier --write \"{shared,backend,frontend}/src/**/*.{ts,tsx}\""
+    "format": "prettier --write \"{shared,backend,frontend}/src/**/*.{ts,tsx}\"",
+    "redis:up": "docker compose up -d",
+    "redis:monitor": "docker compose exec redis redis-cli MONITOR",
+    "redis:cli": "docker compose exec redis redis-cli"
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",

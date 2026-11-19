@@ -1,18 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import RedisMock from 'ioredis-mock';
+import type { ComandoAuditado } from '@projeto-cache/shared';
 import { construirAplicacao, type InstanciaAplicacao } from '../../app.js';
-import type { IRedisCliente } from '../../infra/redis-client.js';
+import { formatarComandoTerminal, type IRedisCliente } from '../../infra/redis-client.js';
 
-describe('Módulo Inspeção (Raio-X do Keyspace e Reset)', () => {
+describe('Módulo Inspeção (Keyspace limpo, Terminal e Reset)', () => {
   let redis: InstanceType<typeof RedisMock>;
   let instancia: InstanciaAplicacao;
+  let comandosCapturados: ComandoAuditado[];
 
   beforeEach(async () => {
     redis = new RedisMock();
     await redis.flushdb();
+    comandosCapturados = [];
     instancia = await construirAplicacao({
       redisCliente: redis as unknown as IRedisCliente,
       modoConexao: 'memoria-mock',
+      onComando: (entrada) => {
+        comandosCapturados.push(entrada);
+      },
     });
     await instancia.catalogoService.popularSeedSeVazio();
     await instancia.carrinhoService.popularCarrinhoDemo();
@@ -23,48 +29,82 @@ describe('Módulo Inspeção (Raio-X do Keyspace e Reset)', () => {
     await redis.quit();
   });
 
-  it('lê o estado completo das chaves e auditoria sem gerar novos comandos de auditoria', async () => {
+  it('lê o estado completo das chaves de domínio sem gravar auditoria no Redis', async () => {
     await instancia.app.inject({
       method: 'PATCH',
       url: '/api/carrinho/cliente-demo/itens/prod-cafe',
       payload: { delta: 1 },
     });
 
-    const inspecao1 = await instancia.app.inject({
+    const totalAntes = comandosCapturados.length;
+
+    const inspecao = await instancia.app.inject({
       method: 'GET',
       url: '/api/inspecao',
     });
 
-    expect(inspecao1.statusCode).toBe(200);
-    const estado1 = inspecao1.json().dados;
-    expect(estado1.totalChaves).toBeGreaterThan(0);
-    expect(estado1.chaves.some((c: { chave: string }) => c.chave === 'catalogo:produtos')).toBe(
+    expect(inspecao.statusCode).toBe(200);
+    const estado = inspecao.json().dados;
+    expect(estado.totalChaves).toBeGreaterThan(0);
+    expect(estado.chaves.some((c: { chave: string }) => c.chave === 'catalogo:produtos')).toBe(
       true
     );
-    expect(estado1.chaves.some((c: { chave: string }) => c.chave === 'carrinho:cliente-demo')).toBe(
+    expect(estado.chaves.some((c: { chave: string }) => c.chave === 'carrinho:cliente-demo')).toBe(
       true
     );
-    const qtdAuditoriaAntes = estado1.auditoria.length;
+    expect(estado.auditoria).toEqual([]);
+    expect(comandosCapturados).toHaveLength(totalAntes);
+  });
 
-    const inspecao2 = await instancia.app.inject({
-      method: 'GET',
-      url: '/api/inspecao',
+  it('não cria a chave auditoria:comandos no Redis após operações de catálogo e carrinho', async () => {
+    await instancia.app.inject({ method: 'GET', url: '/api/produtos' });
+    await instancia.app.inject({
+      method: 'PATCH',
+      url: '/api/carrinho/cliente-demo/itens/prod-cafe',
+      payload: { delta: 1 },
     });
-    expect(inspecao2.json().dados.auditoria.length).toBe(qtdAuditoriaAntes);
+    await instancia.app.inject({
+      method: 'POST',
+      url: '/api/produtos',
+      payload: {
+        sku: 'TERM-01',
+        nome: 'Produto Teste Terminal',
+        categoria: 'Mercearia',
+        precoVarejo: 15,
+        precoAtacado: 12,
+        qtAtacado: 3,
+        estoque: 10,
+      },
+    });
+
+    expect(await redis.exists('auditoria:comandos')).toBe(0);
   });
 
-  it('exibe toda a trilha de auditoria guardada (até 50 comandos)', async () => {
-    for (let i = 0; i < 20; i += 1) {
-      await instancia.app.inject({ method: 'GET', url: '/api/produtos' });
-    }
+  it('notifica onComando e formata comandos para exibição no terminal', async () => {
+    await instancia.app.inject({ method: 'GET', url: '/api/produtos' });
+    await instancia.app.inject({
+      method: 'PATCH',
+      url: '/api/carrinho/cliente-demo/itens/prod-cafe',
+      payload: { delta: 1 },
+    });
 
-    const resposta = await instancia.app.inject({ method: 'GET', url: '/api/inspecao' });
-    const auditoria = resposta.json().dados.auditoria;
-    expect(auditoria.length).toBeGreaterThan(30);
-    expect(auditoria.length).toBeLessThanOrEqual(50);
+    expect(
+      comandosCapturados.some(
+        (c) => c.operacao === 'CONSULTA' && c.comando === 'SMEMBERS catalogo:produtos'
+      )
+    ).toBe(true);
+    const entradaHincrby = comandosCapturados.find(
+      (c) =>
+        c.operacao === 'ALTERACAO' && c.comando === 'HINCRBY carrinho:cliente-demo item:prod-cafe 1'
+    );
+    expect(entradaHincrby).toBeDefined();
+
+    const linhaFormatada = formatarComandoTerminal(entradaHincrby!);
+    expect(linhaFormatada).toContain('[ALTERACAO]');
+    expect(linhaFormatada).toContain('HINCRBY carrinho:cliente-demo item:prod-cafe 1');
   });
 
-  it('reseta o banco para o seed inicial limpando chaves extras', async () => {
+  it('reseta o banco para o seed inicial limpando chaves extras e sem auditoria no Redis', async () => {
     await redis.set('chave:temporaria', 'lixo');
 
     const reset = await instancia.app.inject({
@@ -74,6 +114,7 @@ describe('Módulo Inspeção (Raio-X do Keyspace e Reset)', () => {
 
     expect(reset.statusCode).toBe(200);
     expect(await redis.get('chave:temporaria')).toBeNull();
+    expect(await redis.exists('auditoria:comandos')).toBe(0);
     expect(await redis.scard('catalogo:produtos')).toBe(6);
     expect(await redis.hget('carrinho:cliente-demo', 'item:prod-cafe')).toBe('2');
   });

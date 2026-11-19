@@ -1,14 +1,5 @@
-import type {
-  ChaveInspecionada,
-  ComandoAuditado,
-  EstadoRedis,
-  TipoChaveRedis,
-} from '@projeto-cache/shared';
-import {
-  CHAVE_AUDITORIA,
-  LIMITE_AUDITORIA,
-  type RastreadorRedis,
-} from '../../infra/redis-client.js';
+import type { ChaveInspecionada, EstadoRedis, TipoChaveRedis } from '@projeto-cache/shared';
+import type { RastreadorRedis } from '../../infra/redis-client.js';
 import type { CarrinhoService } from '../carrinho/carrinho-service.js';
 import type { CatalogoService } from '../catalogo/catalogo-service.js';
 
@@ -31,8 +22,7 @@ function prioridadeChave(chave: string): number {
   if (chave === 'catalogo:produtos') return 1;
   if (chave.startsWith('catalogo:sku:')) return 2;
   if (chave.startsWith('produto:')) return 3;
-  if (chave === CHAVE_AUDITORIA) return 4;
-  return 5;
+  return 4;
 }
 
 export class InspecaoService {
@@ -79,16 +69,6 @@ export class InspecaoService {
       });
     }
 
-    const auditoriaBruta = await cliente.lrange(CHAVE_AUDITORIA, 0, LIMITE_AUDITORIA - 1);
-    const auditoria: ComandoAuditado[] = [];
-    for (const linha of auditoriaBruta) {
-      try {
-        auditoria.push(JSON.parse(linha) as ComandoAuditado);
-      } catch {
-        // Ignora registros malformados fora do contrato.
-      }
-    }
-
     const memoriaUsadaLegivel = await this.lerMemoriaUsada();
 
     return {
@@ -96,7 +76,7 @@ export class InspecaoService {
       totalChaves: chavesInspecionadas.length,
       memoriaUsadaLegivel,
       chaves: chavesInspecionadas,
-      auditoria,
+      auditoria: [],
     };
   }
 
@@ -104,7 +84,7 @@ export class InspecaoService {
     await this.rastreador.clienteBruto.flushdb();
     await this.catalogoService.popularSeedSeVazio();
     await this.carrinhoService.popularCarrinhoDemo();
-    await this.rastreador.registrarComando(
+    this.rastreador.registrarComando(
       'FLUSHDB -> SEED (6 produtos + carrinho:cliente-demo TTL 1800s)',
       'INSERCAO'
     );

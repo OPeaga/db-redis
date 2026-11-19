@@ -1,7 +1,7 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
-const FEATURES = ['catalogo', 'carrinho', 'inspecao'];
+const FEATURES = ['catalogo', 'carrinho'];
 
 const featureBoundaryConfigs = FEATURES.map((feature) => {
   const otherFeatures = FEATURES.filter((f) => f !== feature);

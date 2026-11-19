@@ -1,7 +1,9 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import type { ComandoAuditado } from '@projeto-cache/shared';
 import { traduzirErroParaHttp } from './infra/erros.js';
 import {
+  formatarComandoTerminal,
   RastreadorRedis,
   type IRedisCliente,
   type ModoConexaoRedis,
@@ -18,6 +20,8 @@ import { registrarRotasInspecao } from './modules/inspecao/inspecao-controller.j
 export interface DependenciasApp {
   redisCliente: IRedisCliente;
   modoConexao: ModoConexaoRedis;
+  onComando?: (entrada: ComandoAuditado) => void;
+  logarComandosNoTerminal?: boolean;
 }
 
 export interface InstanciaAplicacao {
@@ -40,7 +44,13 @@ export async function construirAplicacao(deps: DependenciasApp): Promise<Instanc
     return reply.status(status).send(corpo);
   });
 
-  const rastreador = new RastreadorRedis(deps.redisCliente, deps.modoConexao);
+  const onComando =
+    deps.onComando ??
+    (deps.logarComandosNoTerminal
+      ? (entrada) => console.log(formatarComandoTerminal(entrada))
+      : undefined);
+
+  const rastreador = new RastreadorRedis(deps.redisCliente, deps.modoConexao, onComando);
 
   const catalogoRepo = new CatalogoRedisRepository(rastreador);
   const carrinhoRepo = new CarrinhoRedisRepository(rastreador);

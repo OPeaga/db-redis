@@ -10,7 +10,6 @@ export interface CatalogoPainelProps {
   busca: string;
   categoriaAtiva: string;
   quantidadesCarrinho: Record<string, number>;
-  raioxAberto: boolean;
   onLimparFiltros: () => void;
   onAdicionarAoCarrinho: (produtoId: string) => Promise<void>;
   onIrParaCarrinho: () => void;
@@ -94,7 +93,6 @@ export const CatalogoPainel: React.FC<CatalogoPainelProps> = ({
   busca,
   categoriaAtiva,
   quantidadesCarrinho,
-  raioxAberto,
   onLimparFiltros,
   onAdicionarAoCarrinho,
   onIrParaCarrinho,
@@ -150,7 +148,7 @@ export const CatalogoPainel: React.FC<CatalogoPainelProps> = ({
           <p className="text-xs text-ink-muted">
             {temFiltroAtivo
               ? 'Tente outro termo de busca ou limpe os filtros aplicados.'
-              : 'Cadastre um novo produto no Painel Admin ou restaure o seed no Raio-X.'}
+              : 'Cadastre um novo produto ou restaure os dados iniciais no Painel Admin.'}
           </p>
           {temFiltroAtivo && (
             <Button variant="secondary" size="sm" onClick={onLimparFiltros}>
@@ -159,11 +157,7 @@ export const CatalogoPainel: React.FC<CatalogoPainelProps> = ({
           )}
         </Card>
       ) : (
-        <div
-          className={
-            raioxAberto ? designTokens.layout.productGrid : designTokens.layout.productGridFull
-          }
-        >
+        <div className={designTokens.layout.productGrid}>
           {produtosFiltrados.map((produto) => {
             const descontoPct =
               produto.qtAtacado !== null && produto.precoVarejo > 0

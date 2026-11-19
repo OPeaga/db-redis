@@ -10,6 +10,7 @@ export interface AdminCatalogoPainelProps {
   ocupado: boolean;
   erroFormulario: string | null;
   onRecarregar: () => Promise<void>;
+  onRestaurarDadosIniciais: () => Promise<void>;
   onCriarProduto: (input: CriarProdutoInput) => Promise<boolean>;
   onAtualizarProduto: (id: string, input: CriarProdutoInput) => Promise<boolean>;
   onAlterarEstoque: (id: string, delta: number) => Promise<void>;
@@ -22,6 +23,7 @@ export const AdminCatalogoPainel: React.FC<AdminCatalogoPainelProps> = ({
   ocupado,
   erroFormulario,
   onRecarregar,
+  onRestaurarDadosIniciais,
   onCriarProduto,
   onAtualizarProduto,
   onAlterarEstoque,
@@ -77,23 +79,30 @@ export const AdminCatalogoPainel: React.FC<AdminCatalogoPainelProps> = ({
         <div>
           <h2 className="text-xl font-bold text-brand-black">Itens Disponíveis à Venda</h2>
           <p className="text-xs text-ink-muted">
-            Gerencie o catálogo no Redis (<code>catalogo:produtos</code>,{' '}
-            <code>produto:{'{id}'}</code> e índice único <code>catalogo:sku:{'{sku}'}</code>).
+            Gerencie produtos, preços de varejo e atacado e saldo de estoque.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void onRestaurarDadosIniciais()}
+            disabled={ocupado}
+          >
+            Restaurar dados iniciais
+          </Button>
           <Button
             variant="secondary"
             size="sm"
             onClick={() => void onRecarregar()}
             disabled={ocupado}
           >
-            Recarregar (SMEMBERS)
+            Atualizar
           </Button>
           {modoFormulario === 'fechado' ? (
             <Button variant="accent" size="sm" onClick={abrirCriacao} disabled={ocupado}>
-              + Novo Produto (POST)
+              + Novo produto
             </Button>
           ) : (
             <Button variant="secondary" size="sm" onClick={fecharFormulario}>
@@ -141,16 +150,14 @@ export const AdminCatalogoPainel: React.FC<AdminCatalogoPainelProps> = ({
         </div>
 
         {carregando ? (
-          <div className="py-10 text-center text-sm text-ink-muted">
-            Carregando catálogo do Redis…
-          </div>
+          <div className="py-10 text-center text-sm text-ink-muted">Carregando catálogo…</div>
         ) : produtosFiltrados.length === 0 ? (
           <div className="py-10 text-center space-y-3">
             <p className="text-xs text-ink-muted">
               Nenhum item encontrado para o filtro selecionado.
             </p>
             <Button variant="secondary" size="sm" onClick={abrirCriacao} disabled={ocupado}>
-              + Novo Produto (POST)
+              + Novo produto
             </Button>
           </div>
         ) : (
@@ -186,7 +193,7 @@ export const AdminCatalogoPainel: React.FC<AdminCatalogoPainelProps> = ({
 
                 <div className="flex flex-wrap items-center gap-2 shrink-0 sm:justify-end">
                   <div className="inline-flex items-center gap-1 mr-1">
-                    <span className="text-[11px] text-ink-muted mr-0.5">HINCRBY:</span>
+                    <span className="text-[11px] text-ink-muted mr-0.5">Estoque:</span>
                     <Button
                       variant="secondary"
                       size="sm"
