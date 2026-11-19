@@ -8,11 +8,11 @@ Aplicação educacional e apresentável demonstrando o paradigma **Cache de Chav
 
 Entregáveis do repositório:
 - Roteiro de apresentação de até 15 minutos em `docs/apresentacao.md`.
-- Aplicação full-stack em bancada dividida (Loja Varejo/Atacado à esquerda + Raio-X do Redis ao vivo à direita) executando CRUD completo no Redis.
+- Aplicação full-stack enxuta (Loja Varejo/Atacado em `:5173` + log colorido de comandos Redis no terminal do backend + **Redis Insight** em `:5540`) executando CRUD completo no Redis.
 
 ## 2. Stack e Ferramentas
 
-- **Banco de Dados**: Redis 7.4 (`redis:7.4-alpine` via `docker-compose.yml`, com AOF habilitado `--appendonly yes`).
+- **Banco de Dados e UI de Inspeção**: Redis 7.4 (`redis:7.4-alpine`) + Redis Insight (`redis/redisinsight:latest`, porta `5540`) via `docker-compose.yml`, com AOF habilitado `--appendonly yes`.
 - **Monorepo**: npm workspaces (`shared`, `backend`, `frontend`).
 - **Contratos (`shared/`)**: TypeScript + Zod (fonte única dos schemas HTTP de request, response e erros).
 - **Backend (`backend/`)**: Node.js 24, TypeScript, Fastify, `@fastify/cors`, `ioredis`, Zod, Vitest + `ioredis-mock`.
@@ -23,29 +23,28 @@ Entregáveis do repositório:
 
 ```
 .
-├── docker-compose.yml           # Redis 7.4 com AOF e healthcheck
-├── package.json                 # Workspaces e scripts raiz
+├── docker-compose.yml           # Redis 7.4 com AOF + Redis Insight (:5540)
+├── package.json                 # Workspaces e scripts raiz (inclui redis:up/monitor/cli)
 ├── shared/                      # Contratos Zod compartilhados (sem regra de negócio)
 ├── backend/
 │   └── src/
 │       ├── app.ts               # Raiz de composição (DI)
 │       ├── server.ts            # Inicialização HTTP + fallback opcional em dev
-│       ├── infra/               # Cliente Redis + gravador/auditoria de comandos
+│       ├── infra/               # Cliente Redis + formatador/logger de comandos no terminal
 │       └── modules/
 │           ├── catalogo/        # repository (interface + Redis), service, controller, seed, test
 │           ├── carrinho/        # repository (interface + Redis), service, controller, seed, test
-│           └── inspecao/        # leitura de keyspace/TTL, auditoria e reset para seed
+│           └── inspecao/        # endpoint de leitura de keyspace/TTL e reset para seed
 ├── frontend/
 │   └── src/
 │       ├── app/                 # Shell da aplicação
-│       ├── pages/bancada/       # Página única split-screen (compõe features)
+│       ├── pages/bancada/       # Página única da loja enxuta (compõe features)
 │       ├── features/
-│       │   ├── catalogo/        # Catálogo Varejo/Atacado + CRUD de produtos
-│       │   ├── carrinho/        # Carrinho com cálculo de atacado e controle de TTL
-│       │   └── inspecao/        # Raio-X do Redis (comandos e estruturas em memória)
+│       │   ├── catalogo/        # Catálogo Varejo/Atacado + CRUD de produtos + restaurar seed
+│       │   └── carrinho/        # Carrinho com cálculo de atacado e controles de validade
 │       └── shared/              # http-client, api-error, primitives (design system)
 └── docs/
-    ├── adr/                     # Decisões arquiteturais (ADR 0001)
+    ├── adr/                     # Decisões arquiteturais (ADR 0001 e ADR 0002)
     ├── apresentacao.md          # Roteiro completo da apresentação (15 min)
     └── guia-redis-para-quem-sabe-sql.md  # Guia didático Redis x SQL
 ```
@@ -55,8 +54,8 @@ Entregáveis do repositório:
 - **Backend (Módulos enxutos com DI/SOLID)**:
   - Fluxo por módulo: `controller -> service -> repository` (com interface `I*Repository` e implementação Redis concreta injetada em `app.ts`).
   - Regras de domínio vivem no `service` e lançam erros semânticos (`ErroDominio` com `invalid`, `not_found`, `conflict`); o plugin de erro HTTP do Fastify traduz para `400`, `404`, `409` ou `500` no formato `erroApiSchema` (`{ codigo, mensagem, detalhes }`).
-  - Todo endpoint de mutação ou consulta retorna o envelope `envelopeOperacaoSchema`: `{ dados, comandosRedis }`, carregando exatamente os comandos Redis executados naquela requisição para o Raio-X da UI.
-  - Exceções ao envelope: `GET /api/inspecao` devolve `comandosRedis: []` de propósito (a leitura do Raio-X não pode poluir a auditoria que ela mesma exibe) e `GET /api/health` devolve só `{ ok, modoConexao }`.
+  - Todo endpoint de mutação ou consulta retorna o envelope `envelopeOperacaoSchema`: `{ dados, comandosRedis }`, e o `RastreadorRedis` emite cada comando em tempo real no terminal do backend (`formatarComandoTerminal`), sem gravar chave extra no Redis.
+  - Exceções ao envelope: `GET /api/inspecao` devolve `comandosRedis: []` e `auditoria: []`, e `GET /api/health` devolve só `{ ok, modoConexao }`.
 - **Frontend (`frontend-feature-architecture`)**:
   - Importações descem unidirecionalmente: `app -> pages -> features -> shared`.
   - Features não importam umas às outras nem `app/`; toda comunicação HTTP passa por `src/shared/api/http-client.ts` (regra fiscalizada no ESLint).
@@ -74,7 +73,8 @@ Entregáveis do repositório:
 | `catalogo:produtos` | `Set` | — | Índice primário com os IDs dos produtos ativos. |
 | `catalogo:sku:{sku}` | `String` | — | Índice único de SKU via `SET ... NX` apontando para o `produto.id`. |
 | `carrinho:{cliente_id}` | `Hash` | `1800s` na criação (ajustável) | Pares `item:{produto_id} -> quantidade`. O `EXPIRE` padrão só é aplicado quando a chave não tem TTL; alterar itens preserva o TTL restante ou ajustado manualmente. |
-| `auditoria:comandos` | `List` | — | Últimos 50 comandos Redis serializados em JSON (`LPUSH` + `LTRIM 0 49`). |
+
+*(A chave `auditoria:comandos` foi removida para manter o keyspace e o Profiler do Redis Insight 100% limpos; ver ADR 0002.)*
 
 ### Limitações conhecidas (decisões de escopo)
 
@@ -87,8 +87,9 @@ Entregáveis do repositório:
 
 No Windows PowerShell (onde scripts `.ps1` são bloqueados), usar `npm.cmd` e `npx.cmd`:
 - Instalar dependências: `npm.cmd install`
-- Subir Redis local: `docker compose up -d`
-- Rodar backend + frontend em dev: `npm.cmd run dev`
+- Subir Redis local + Redis Insight (`:5540`): `docker compose up -d` (ou `npm.cmd run redis:up`)
+- Rodar backend (com log de comandos no terminal) + frontend em dev: `npm.cmd run dev`
+- Acompanhar `redis-cli MONITOR` nativo (opcional): `npm.cmd run redis:monitor`
 - Executar todos os testes (em background se demorado): `npm.cmd test`
 - Build completo (`shared`, `backend`, `frontend`): `npm.cmd run build`
 - Lint e checagem de formatação: `npm.cmd run lint`
